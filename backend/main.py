@@ -232,11 +232,72 @@ def _ask_groq(transcript: str, question: str) -> dict:
 # Traceability engine
 # -----------------------------------------------------------------------
 
+SEMANTIC_VERIFY_PROMPT = """You are a fact-checking assistant for a financial transcript verification system.
+
+For each passage in the list below, decide whether it is semantically faithful to the transcript.
+
+FAITHFUL — mark true when:
+- The core facts, numbers, names, and meaning are preserved, even if the wording differs
+- Minor paraphrasing or stylistic rewording that does not alter the information
+
+UNFAITHFUL — mark false when:
+- Specific figures (percentages, dollar amounts, dates) are wrong or fabricated
+- Names, companies, or roles are incorrect
+- The meaning is materially inverted, distorted, or omitted
+- Information is introduced that does not appear anywhere in the transcript
+
+For each passage also return "best_match": the shortest verbatim substring from the transcript \
+that best represents the same information (copy it exactly). If unfaithful, set "best_match" to null.
+
+Transcript:
+\"\"\"
+{transcript}
+\"\"\"
+
+Passages to verify:
+{passages_json}
+
+Return a JSON object in this exact shape — one entry per passage in the same order:
+{{
+  "verifications": [
+    {{"faithful": true,  "best_match": "exact verbatim substring from transcript"}},
+    {{"faithful": false, "best_match": null}}
+  ]
+}}"""
+
+
+def _semantic_verify_batch(transcript: str, passages: list[str]) -> list[dict]:
+    """
+    One LLM call that judges every unmatched passage for semantic faithfulness
+    and returns the best verbatim highlight span for those that pass.
+    """
+    response = _client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a fact-checking assistant. Respond with valid JSON only.",
+            },
+            {
+                "role": "user",
+                "content": SEMANTIC_VERIFY_PROMPT.format(
+                    transcript=transcript,
+                    passages_json=json.dumps(passages, indent=2),
+                ),
+            },
+        ],
+        max_tokens=1024,
+        temperature=0,
+        response_format={"type": "json_object"},
+    )
+    result = json.loads(response.choices[0].message.content.strip())
+    return result.get("verifications", [{}] * len(passages))
+
 
 def verify_quotes(transcript: str, metrics: list[dict]) -> list[dict]:
     """
-    Locate each source_quote inside the original transcript.
-    Plain str.find() — if the AI changed even one character, verification fails.
+    Exact-match traceability for structured metric extraction.
+    Metrics use verbatim-quote prompts, so strict matching is appropriate here.
     """
     verified: list[dict] = []
     for item in metrics:
@@ -257,25 +318,69 @@ def verify_quotes(transcript: str, metrics: list[dict]) -> list[dict]:
 
 
 def verify_passages(transcript: str, passages: list[str]) -> list[dict]:
-    """Same str.find traceability, applied to free-form source passages from Q&A."""
-    verified: list[dict] = []
-    for text in passages:
+    """
+    Two-stage traceability for Q&A source passages.
+
+    Stage 1 — exact match (str.find): fast, zero cost, perfect highlight accuracy.
+    Stage 2 — semantic check (LLM): for passages that didn't match exactly, judge
+               whether the meaning is faithfully preserved and find the best verbatim
+               highlight span. ❌ only when facts are wrong or hallucinated.
+    """
+    results: list[dict | None] = [None] * len(passages)
+    unmatched_indices: list[int] = []
+
+    # Stage 1: exact match
+    for i, text in enumerate(passages):
         start = transcript.find(text)
         if start != -1:
-            verified.append({
+            results[i] = {
                 "text": text,
                 "verified": True,
                 "highlight_start": start,
                 "highlight_end": start + len(text),
-            })
+            }
         else:
-            verified.append({
-                "text": text,
+            unmatched_indices.append(i)
+
+    # Stage 2: semantic check for anything that didn't match exactly
+    if unmatched_indices and HAS_GROQ:
+        unmatched_texts = [passages[i] for i in unmatched_indices]
+        try:
+            semantic = _semantic_verify_batch(transcript, unmatched_texts)
+        except Exception:
+            semantic = [{"faithful": False, "best_match": None}] * len(unmatched_texts)
+
+        for idx, sem in zip(unmatched_indices, semantic):
+            text = passages[idx]
+            faithful = sem.get("faithful", False)
+            best_match = sem.get("best_match") or ""
+
+            if faithful and best_match:
+                match_start = transcript.find(best_match)
+                results[idx] = {
+                    "text": text,
+                    "verified": True,
+                    "highlight_start": match_start if match_start != -1 else None,
+                    "highlight_end": (match_start + len(best_match)) if match_start != -1 else None,
+                }
+            else:
+                results[idx] = {
+                    "text": text,
+                    "verified": False,
+                    "highlight_start": None,
+                    "highlight_end": None,
+                }
+    else:
+        # Demo mode or no Groq: unmatched = unverified
+        for i in unmatched_indices:
+            results[i] = {
+                "text": passages[i],
                 "verified": False,
                 "highlight_start": None,
                 "highlight_end": None,
-            })
-    return verified
+            }
+
+    return [r for r in results if r is not None]
 
 
 # -----------------------------------------------------------------------
