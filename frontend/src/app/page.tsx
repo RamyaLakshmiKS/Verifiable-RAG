@@ -106,6 +106,33 @@ export default function Home() {
     }
   }
 
+  // ── Manual verification handlers ─────────────────────────────────────
+
+  function handleManualVerify(metric: Metric) {
+    setMetricsResult((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        metrics: prev.metrics.map((m) =>
+          m.name === metric.name
+            ? { ...m, verified: true, manuallyVerified: true }
+            : m
+        ),
+      };
+    });
+    // Clear active metric so highlight resets
+    setActiveMetric(null);
+  }
+
+  function handleAskQA(metric: Metric) {
+    setActiveTab("qa");
+    ask(
+      `The Metrics tab flagged "${metric.name}" (value: ${metric.value}) as unverified — ` +
+      `meaning the exact quote was not found in the transcript. ` +
+      `Does the transcript actually mention this metric? If so, what does it say?`
+    );
+  }
+
   // ── Derived highlights for TranscriptPanel ───────────────────────────
   let highlights: HighlightRange[] = [];
 
@@ -209,6 +236,8 @@ export default function Home() {
                 metrics={metricsResult!.metrics}
                 activeMetric={activeMetric}
                 onHover={setActiveMetric}
+                onManualVerify={handleManualVerify}
+                onAskQA={handleAskQA}
               />
             ) : (
               <QAPanel

@@ -5,6 +5,7 @@ export interface Metric {
   verified: boolean;
   highlight_start: number | null;
   highlight_end: number | null;
+  manuallyVerified?: boolean;
 }
 
 export interface AnalysisResult {
