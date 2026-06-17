@@ -1,79 +1,167 @@
 # Verifiable RAG
 
-> AI that shows its work — trace every extracted metric back to its exact source.
+**Trace every AI-extracted metric back to its exact source in the original document.**
 
-## ✨ Highlights
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Next.js](https://img.shields.io/badge/Next.js-14-black)
+![Powered by Groq](https://img.shields.io/badge/powered%20by-Groq-orange)
 
-- 🔍 **Source traceability** — every AI-extracted metric is pinned to its verbatim quote in the original document
-- 🟡 **Yellow-highlighter UI** — hover any metric and the exact sentence lights up in the transcript panel
-- 🚨 **Hallucination detection** — quotes that don't exist in the source are flagged in red automatically
-- ⚡ **Powered by Groq + Llama 3.3** — fast, free-tier inference with deterministic JSON output
-- 🔄 **Demo mode** — works out of the box without an API key using simulated data
+---
 
-## 📖 Overview
+## Table of Contents
 
-Verifiable RAG is a prototype that solves the trust problem in AI-generated financial summaries. When an AI reads a 100-page earnings call transcript and hands you "Revenue grew 15%", you shouldn't have to take its word for it.
+- [Description](#description)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Environment Variables](#environment-variables)
+- [Tests](#tests)
+- [Contributing](#contributing)
+- [License](#license)
 
-This tool forces the model to return the **exact verbatim substring** it used as evidence alongside every metric. A traceability engine then does a literal string search to verify the quote exists in the source — if the AI paraphrased or fabricated it, verification fails and the metric is flagged.
+---
 
-The result is a side-by-side UI: a clean metrics table on the left, the raw transcript on the right, and a yellow highlight connecting the two the moment you hover.
+## Description
 
-Built with a **FastAPI** backend (Python) and a **Next.js** frontend (TypeScript).
+Verifiable RAG solves the core trust problem with AI in financial services: when a model reads a 100-page earnings call and tells you "Revenue grew 15%", how do you know it didn't make that up?
 
-## 🖥️ Usage
+This tool forces the AI to return the **exact verbatim substring** it used as evidence alongside every metric it extracts. A traceability engine then performs a literal string search — if the quote doesn't exist word-for-word in the source, the metric is flagged as potentially hallucinated.
 
-Paste any financial transcript into the input box and click **Analyze**.
+The result is a side-by-side interface: a clean metrics table on the left, the raw transcript on the right. Hover any metric and the exact sentence that produced it lights up like a yellow highlighter.
 
-| Panel | What it shows |
-|---|---|
-| **Metrics table** (left) | Extracted metrics with verified ✅ or hallucinated ❌ badges |
-| **Transcript** (right) | Raw source text — highlighted on hover |
+**Why this stack:**
+- **FastAPI (Python)** — lightweight, fast to iterate, natural fit for LLM orchestration
+- **Next.js + TypeScript** — type-safe frontend with React state for real-time hover highlighting
+- **Groq + Llama 3.3 70B** — free-tier inference with JSON mode for reliable structured output
 
-Hover a metric row → the exact source sentence lights up in yellow.
-A red "Hallucinated" badge means the model's quote could not be found verbatim in the source.
+**How the traceability engine works:**
 
-## 🚀 Installation
+```
+Transcript → Groq (Llama 3.3) → { name, value, source_quote }
+                                          ↓
+                               str.find(source_quote, transcript)
+                                          ↓
+                          verified ✅  or  hallucinated ❌
+```
+
+If the model paraphrases even a single word, `str.find()` returns `-1` and the metric fails verification.
+
+---
+
+## Installation
 
 **Requirements:** Python 3.10+, Node.js 18+
 
-**1. Clone the repo**
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/RamyaLakshmi/Verifiable-RAG.git
 cd Verifiable-RAG
 ```
 
-**2. Backend**
+### 2. Set up the backend
 
 ```bash
 cd backend
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env          # add your GROQ_API_KEY
+cp .env.example .env             # then add your GROQ_API_KEY
+```
+
+### 3. Set up the frontend
+
+```bash
+cd ../frontend
+npm install
+```
+
+---
+
+## Usage
+
+**Start the backend** (Terminal 1):
+
+```bash
+cd backend
+source .venv/bin/activate
 uvicorn main:app --reload
 ```
 
-**3. Frontend**
+**Start the frontend** (Terminal 2):
 
 ```bash
 cd frontend
-npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-> **No API key?** The app runs in demo mode with a pre-loaded sample transcript — no setup required.
+1. The textarea is pre-filled with a sample financial transcript
+2. Click **Analyze →**
+3. Hover any row in the metrics table — the exact source sentence highlights in yellow
+4. Rows marked **Hallucinated** in red have quotes that could not be found verbatim in the transcript
 
-## 🔑 Environment variables
+> **No API key?** The app runs in demo mode automatically — no setup required to see it in action.
 
-Copy `backend/.env.example` to `backend/.env` and fill in your values.
+---
 
-| Variable | Default | Description |
-|---|---|---|
-| `GROQ_API_KEY` | — | Free key from [console.groq.com](https://console.groq.com) |
-| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Swap to `llama-3.1-8b-instant` for lower latency |
+## Environment Variables
 
-## 💬 Feedback & contributions
+Copy `backend/.env.example` to `backend/.env` and fill in your values:
 
-Found a bug or have an idea? Open an issue — questions, suggestions, and pull requests are all welcome.
+```bash
+cp backend/.env.example backend/.env
+```
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `GROQ_API_KEY` | Yes (for live mode) | — | Free key from [console.groq.com](https://console.groq.com) |
+| `GROQ_MODEL` | No | `llama-3.3-70b-versatile` | Use `llama-3.1-8b-instant` for lower latency |
+
+---
+
+## Tests
+
+Verify the traceability engine directly without running the server:
+
+```bash
+cd backend
+source .venv/bin/activate
+python -c "
+from main import verify_quotes, _extract_simulated, DEMO_TRANSCRIPT
+metrics = _extract_simulated(DEMO_TRANSCRIPT)
+verified = verify_quotes(DEMO_TRANSCRIPT, metrics)
+for m in verified:
+    status = 'VERIFIED' if m['verified'] else 'HALLUCINATED'
+    print(f'{status:12} | {m[\"name\"]:25} | start={m[\"highlight_start\"]}')
+"
+```
+
+Expected output:
+
+```
+VERIFIED     | Q4 Revenue Growth         | start=139
+VERIFIED     | Annual Churn Rate         | start=254
+HALLUCINATED | EBITDA Margin             | start=None
+```
+
+---
+
+## Contributing
+
+Contributions, issues, and feature requests are welcome.
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/your-feature`
+3. Commit your changes: `git commit -m 'Add your feature'`
+4. Push to the branch: `git push origin feature/your-feature`
+5. Open a Pull Request
+
+Please open an issue first if you'd like to discuss a significant change.
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE) — © 2026 RamyaLakshmi KS.
