@@ -93,7 +93,7 @@ export default function Home() {
                 : "bg-slate-100 text-slate-500 border-slate-200"
             }`}
           >
-            {mode === "live" ? "Live (Anthropic API)" : "Demo mode"}
+            {mode === "live" ? "Live" : "Demo mode"}
           </span>
         )}
       </header>
