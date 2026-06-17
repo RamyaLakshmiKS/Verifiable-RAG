@@ -12,3 +12,21 @@ export interface AnalysisResult {
   metrics: Metric[];
   mode: "live" | "demo";
 }
+
+export interface SourcePassage {
+  text: string;
+  verified: boolean;
+  highlight_start: number | null;
+  highlight_end: number | null;
+}
+
+export interface QAHistoryItem {
+  question: string;
+  answer: string;
+  source_passages: SourcePassage[];
+}
+
+export interface HighlightRange {
+  start: number;
+  end: number;
+}

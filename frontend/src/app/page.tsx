@@ -3,29 +3,45 @@
 import { useEffect, useState } from "react";
 import { MetricsPanel } from "@/components/MetricsPanel";
 import { TranscriptPanel } from "@/components/TranscriptPanel";
-import { AnalysisResult, Metric } from "@/types";
+import { QAPanel } from "@/components/QAPanel";
+import { TabBar } from "@/components/TabBar";
+import {
+  AnalysisResult,
+  Metric,
+  QAHistoryItem,
+  HighlightRange,
+} from "@/types";
 
 const API = "http://localhost:8000";
 
-export default function Home() {
-  const [transcript, setTranscript] = useState("");
-  const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [activeMetric, setActiveMetric] = useState<Metric | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<"live" | "demo" | null>(null);
+type Tab = "metrics" | "qa";
 
-  // Pre-fill the demo transcript on mount
+export default function Home() {
+  // ── Shared ──────────────────────────────────────────────────────────
+  const [transcript, setTranscript] = useState("");
+  const [mode, setMode] = useState<"live" | "demo" | null>(null);
+  const [activeTab, setActiveTab] = useState<Tab>("metrics");
+
+  // ── Metrics tab ─────────────────────────────────────────────────────
+  const [metricsResult, setMetricsResult] = useState<AnalysisResult | null>(null);
+  const [activeMetric, setActiveMetric] = useState<Metric | null>(null);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [metricsError, setMetricsError] = useState<string | null>(null);
+
+  // ── Q&A tab ─────────────────────────────────────────────────────────
+  const [qaHistory, setQaHistory] = useState<QAHistoryItem[]>([]);
+  const [activeQA, setActiveQA] = useState<QAHistoryItem | null>(null);
+  const [qaLoading, setQaLoading] = useState(false);
+  const [qaError, setQaError] = useState<string | null>(null);
+
+  // ── Bootstrap ────────────────────────────────────────────────────────
   useEffect(() => {
     fetch(`${API}/demo-transcript`)
       .then((r) => r.json())
       .then((d) => setTranscript(d.transcript))
-      .catch(() => {
-        // Backend not running yet — show placeholder
-        setTranscript(
-          "Start the backend (uvicorn main:app --reload) and refresh."
-        );
-      });
+      .catch(() =>
+        setTranscript("Start the backend (uvicorn main:app --reload) and refresh.")
+      );
 
     fetch(`${API}/health`)
       .then((r) => r.json())
@@ -33,10 +49,11 @@ export default function Home() {
       .catch(() => {});
   }, []);
 
+  // ── Actions ──────────────────────────────────────────────────────────
   async function analyze() {
-    setLoading(true);
-    setError(null);
-    setResult(null);
+    setMetricsLoading(true);
+    setMetricsError(null);
+    setMetricsResult(null);
     setActiveMetric(null);
 
     try {
@@ -45,43 +62,84 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ transcript }),
       });
-
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.detail ?? "Unknown error");
       }
-
       const data: AnalysisResult = await res.json();
-      setResult(data);
+      setMetricsResult(data);
       setMode(data.mode);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to reach backend.");
+      setMetricsError(e instanceof Error ? e.message : "Failed to reach backend.");
     } finally {
-      setLoading(false);
+      setMetricsLoading(false);
     }
   }
 
+  async function ask(question: string) {
+    setQaLoading(true);
+    setQaError(null);
+
+    try {
+      const res = await fetch(`${API}/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript, question }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail ?? "Unknown error");
+      }
+      const data = await res.json();
+      const item: QAHistoryItem = {
+        question: data.question,
+        answer: data.answer,
+        source_passages: data.source_passages,
+      };
+      setQaHistory((prev) => [...prev, item]);
+      setActiveQA(item);
+      setMode(data.mode);
+    } catch (e: unknown) {
+      setQaError(e instanceof Error ? e.message : "Failed to reach backend.");
+    } finally {
+      setQaLoading(false);
+    }
+  }
+
+  // ── Derived highlights for TranscriptPanel ───────────────────────────
+  let highlights: HighlightRange[] = [];
+
+  if (activeTab === "metrics" && activeMetric?.verified && activeMetric.highlight_start !== null) {
+    highlights = [{ start: activeMetric.highlight_start, end: activeMetric.highlight_end! }];
+  } else if (activeTab === "qa" && activeQA) {
+    highlights = activeQA.source_passages
+      .filter((p) => p.verified && p.highlight_start !== null)
+      .map((p) => ({ start: p.highlight_start!, end: p.highlight_end! }));
+  }
+
+  // ── Layout flags ─────────────────────────────────────────────────────
+  const showTwoPanel =
+    (activeTab === "metrics" && metricsResult !== null) ||
+    (activeTab === "qa" && transcript.trim() !== "");
+
+  const showExplainer =
+    activeTab === "metrics" && !metricsResult && !metricsLoading;
+
   return (
     <div className="min-h-screen flex flex-col">
-      {/* ── Header ─────────────────────────────────────────────── */}
+      {/* ── Header ───────────────────────────────────────────────────── */}
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-            <svg
-              className="w-4 h-4 text-white"
-              viewBox="0 0 16 16"
-              fill="none"
-            >
-              <rect x="1" y="1" width="6" height="14" rx="1" fill="white" opacity="0.4"/>
-              <rect x="9" y="4" width="6" height="3" rx="0.5" fill="white"/>
-              <rect x="9" y="9" width="6" height="3" rx="0.5" fill="white"/>
+            <svg className="w-4 h-4 text-white" viewBox="0 0 16 16" fill="none">
+              <rect x="1" y="1" width="6" height="14" rx="1" fill="white" opacity="0.4" />
+              <rect x="9" y="4" width="6" height="3" rx="0.5" fill="white" />
+              <rect x="9" y="9" width="6" height="3" rx="0.5" fill="white" />
             </svg>
           </div>
           <div>
             <span className="font-semibold text-slate-900">Verifiable RAG</span>
-            <span className="ml-2 text-xs text-slate-400">
-              AI with a paper trail
-            </span>
+            <span className="ml-2 text-xs text-slate-400">AI with a paper trail</span>
           </div>
         </div>
 
@@ -93,40 +151,20 @@ export default function Home() {
                 : "bg-slate-100 text-slate-500 border-slate-200"
             }`}
           >
-            {mode === "live" ? "Live" : "Demo mode"}
+            {mode === "live" ? "Live (Groq)" : "Demo mode"}
           </span>
         )}
       </header>
 
-      {/* ── How it works banner ─────────────────────────────────── */}
-      <div className="bg-blue-600 text-white px-6 py-3 text-sm flex items-center gap-2">
-        <span className="opacity-70">How it works:</span>
-        <span className="opacity-90">
-          1. Paste a transcript below
-        </span>
-        <span className="opacity-50 mx-1">→</span>
-        <span className="opacity-90">2. Click Analyze</span>
-        <span className="opacity-50 mx-1">→</span>
-        <span className="opacity-90">
-          3. Hover any metric to highlight its exact source
-        </span>
-        <span className="opacity-50 mx-1">→</span>
-        <span className="opacity-90">
-          4. Unverified rows flag potential hallucinations
-        </span>
-      </div>
-
-      {/* ── Main ────────────────────────────────────────────────── */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-8 flex flex-col gap-6">
-        {/* Input card */}
+      {/* ── Main ─────────────────────────────────────────────────────── */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-8 flex flex-col gap-5">
+        {/* Transcript input */}
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
           <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-700">
-              Input Transcript
-            </h2>
+            <h2 className="text-sm font-semibold text-slate-700">Input Transcript</h2>
             <button
               onClick={analyze}
-              disabled={loading || !transcript.trim()}
+              disabled={metricsLoading || !transcript.trim()}
               className="
                 px-4 py-1.5 text-sm font-medium rounded-lg
                 bg-blue-600 text-white
@@ -135,7 +173,7 @@ export default function Home() {
                 transition-colors duration-150
               "
             >
-              {loading ? "Analyzing…" : "Analyze →"}
+              {metricsLoading ? "Analyzing…" : "Analyze →"}
             </button>
           </div>
           <textarea
@@ -145,52 +183,67 @@ export default function Home() {
             placeholder="Paste an expert call transcript, earnings call, or any financial text…"
             className="
               w-full px-5 py-4 text-sm font-mono text-slate-700
-              placeholder:text-slate-300 resize-none
-              focus:outline-none bg-white
+              placeholder:text-slate-300 resize-none focus:outline-none bg-white
             "
           />
         </div>
 
-        {/* Error */}
-        {error && (
+        {/* Tab bar */}
+        <TabBar active={activeTab} onChange={setActiveTab} />
+
+        {/* Metrics tab error */}
+        {activeTab === "metrics" && metricsError && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-5 py-3 rounded-xl text-sm">
-            <strong>Error:</strong> {error}
+            <strong>Error:</strong> {metricsError}
           </div>
         )}
 
-        {/* Results */}
-        {result && (
-          <div className="grid grid-cols-2 gap-5 flex-1" style={{ minHeight: "420px" }}>
-            <MetricsPanel
-              metrics={result.metrics}
-              activeMetric={activeMetric}
-              onHover={setActiveMetric}
-            />
-            <TranscriptPanel
-              transcript={result.transcript}
-              activeMetric={activeMetric}
-            />
+        {/* Two-panel layout */}
+        {showTwoPanel && (
+          <div
+            className="grid grid-cols-2 gap-5 flex-1"
+            style={{ minHeight: "480px" }}
+          >
+            {activeTab === "metrics" ? (
+              <MetricsPanel
+                metrics={metricsResult!.metrics}
+                activeMetric={activeMetric}
+                onHover={setActiveMetric}
+              />
+            ) : (
+              <QAPanel
+                transcript={transcript}
+                history={qaHistory}
+                activeQA={activeQA}
+                loading={qaLoading}
+                error={qaError}
+                onAsk={ask}
+                onSelect={setActiveQA}
+              />
+            )}
+
+            <TranscriptPanel transcript={transcript} highlights={highlights} />
           </div>
         )}
 
-        {/* Explainer — shown before first analysis */}
-        {!result && !loading && (
+        {/* Explainer cards — shown before first metrics analysis */}
+        {showExplainer && (
           <div className="grid grid-cols-3 gap-4">
             {[
               {
                 step: "01",
                 title: "Extract",
-                body: "The AI reads the transcript and pulls out every financial metric it finds, along with the exact substring it used as evidence.",
+                body: "The AI reads the transcript and pulls out every financial metric, along with the exact substring it used as evidence.",
               },
               {
                 step: "02",
                 title: "Verify",
-                body: "The backend does a literal string search: if the quote doesn't exist verbatim in the source, the metric is flagged as unverified.",
+                body: "A literal string search checks whether each quote exists verbatim in the source. Any deviation is flagged as unverified.",
               },
               {
                 step: "03",
                 title: "Highlight",
-                body: "Hover any metric in the table and the exact sentence lights up in the transcript — your digital yellow highlighter.",
+                body: "Hover any metric or ask a question — the exact supporting sentence lights up in the transcript panel.",
               },
             ].map((c) => (
               <div
@@ -201,9 +254,7 @@ export default function Home() {
                   STEP {c.step}
                 </span>
                 <h3 className="mt-1 font-semibold text-slate-800">{c.title}</h3>
-                <p className="mt-1 text-sm text-slate-500 leading-relaxed">
-                  {c.body}
-                </p>
+                <p className="mt-1 text-sm text-slate-500 leading-relaxed">{c.body}</p>
               </div>
             ))}
           </div>

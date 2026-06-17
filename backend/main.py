@@ -43,6 +43,11 @@ class TranscriptRequest(BaseModel):
     transcript: str
 
 
+class QuestionRequest(BaseModel):
+    transcript: str
+    question: str
+
+
 # -----------------------------------------------------------------------
 # Demo data
 # -----------------------------------------------------------------------
@@ -141,6 +146,72 @@ def _extract_groq(transcript: str) -> list[dict]:
 
 
 # -----------------------------------------------------------------------
+# Q&A — simulated vs. live
+# -----------------------------------------------------------------------
+
+QA_PROMPT = """You are a financial analyst assistant. Answer the user's question using ONLY the information in the transcript below.
+
+Rules:
+1. Answer concisely and directly in 2-3 sentences.
+2. For "source_passages", list the EXACT verbatim substrings from the transcript that support your answer — copy them character-for-character, do not paraphrase or summarise.
+3. If the answer is not in the transcript, set answer to "This information is not available in the transcript." and return an empty source_passages array.
+
+Return valid JSON only in this exact shape:
+{{
+  "answer": "your answer here",
+  "source_passages": ["exact verbatim substring 1", "exact verbatim substring 2"]
+}}
+
+Question: {question}
+
+Transcript:
+\"\"\"
+{transcript}
+\"\"\""""
+
+
+def _ask_simulated(transcript: str, question: str) -> dict:
+    """Demo mode: fixed response that covers all key points in the demo transcript."""
+    return {
+        "answer": (
+            "The software division performed well despite a tough market. "
+            "Revenue grew 15% in Q4, churn stayed flat at 2.5% annually, "
+            "and operational efficiency improved with OpEx dropping to 41% of revenue."
+        ),
+        "source_passages": [
+            "we actually saw 15% revenue growth in Q4",
+            "The churn rate stayed relatively flat at about 2.5% annually.",
+            "OpEx as a percentage of revenue dropped to 41%",
+        ],
+    }
+
+
+def _ask_groq(transcript: str, question: str) -> dict:
+    """Live mode: Llama 3.3 answers the question and returns verbatim source passages."""
+    response = _client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a financial analyst assistant. "
+                    "Always respond with valid JSON only — no markdown, no prose."
+                ),
+            },
+            {
+                "role": "user",
+                "content": QA_PROMPT.format(transcript=transcript, question=question),
+            },
+        ],
+        max_tokens=1024,
+        temperature=0,
+        response_format={"type": "json_object"},
+    )
+
+    return json.loads(response.choices[0].message.content.strip())
+
+
+# -----------------------------------------------------------------------
 # Traceability engine
 # -----------------------------------------------------------------------
 
@@ -165,6 +236,28 @@ def verify_quotes(transcript: str, metrics: list[dict]) -> list[dict]:
             item["highlight_end"] = None
 
         verified.append(item)
+    return verified
+
+
+def verify_passages(transcript: str, passages: list[str]) -> list[dict]:
+    """Same str.find traceability, applied to free-form source passages from Q&A."""
+    verified: list[dict] = []
+    for text in passages:
+        start = transcript.find(text)
+        if start != -1:
+            verified.append({
+                "text": text,
+                "verified": True,
+                "highlight_start": start,
+                "highlight_end": start + len(text),
+            })
+        else:
+            verified.append({
+                "text": text,
+                "verified": False,
+                "highlight_start": None,
+                "highlight_end": None,
+            })
     return verified
 
 
@@ -203,6 +296,32 @@ def analyze(request: TranscriptRequest):
     return {
         "transcript": transcript,
         "metrics": metrics,
+        "mode": "live" if HAS_GROQ else "demo",
+        "model": GROQ_MODEL if HAS_GROQ else None,
+    }
+
+
+@app.post("/ask")
+def ask(request: QuestionRequest):
+    transcript = request.transcript.strip()
+    question = request.question.strip()
+
+    if not transcript:
+        raise HTTPException(status_code=400, detail="Transcript cannot be empty.")
+    if not question:
+        raise HTTPException(status_code=400, detail="Question cannot be empty.")
+
+    try:
+        result = _ask_groq(transcript, question) if HAS_GROQ else _ask_simulated(transcript, question)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Q&A failed: {exc}")
+
+    source_passages = verify_passages(transcript, result.get("source_passages", []))
+
+    return {
+        "question": question,
+        "answer": result.get("answer", ""),
+        "source_passages": source_passages,
         "mode": "live" if HAS_GROQ else "demo",
         "model": GROQ_MODEL if HAS_GROQ else None,
     }
