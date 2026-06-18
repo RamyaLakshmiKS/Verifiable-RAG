@@ -11,7 +11,7 @@
 
 ## Working Demo
 
-<video src="public/Demo.mp4" controls width="100%"></video>
+https://github.com/user-attachments/assets/33534a12-6fd8-42fb-aebb-a64e2b7aa610
 
 ---
 
