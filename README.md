@@ -11,7 +11,7 @@
   </table>
 </div>
 
-**Trace every AI-extracted metric back to its exact source. Ask questions. Flag hallucinations. Review with confidence.**
+**Trace every AI-extracted metric/information back to its exact source. Ask questions. Flag hallucinations. Review with confidence.**
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
