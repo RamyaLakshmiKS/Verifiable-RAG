@@ -33,9 +33,11 @@ https://github.com/user-attachments/assets/33534a12-6fd8-42fb-aebb-a64e2b7aa610
 
 Verifiable RAG solves the core trust problem with AI in financial services: when a model reads a 100-page earnings call and tells you "Revenue grew 15%", how do you know it didn't make that up?
 
-This tool forces the AI to return the **exact verbatim substring** it used as evidence alongside every metric it extracts. A traceability engine then performs a literal string search — if the quote doesn't exist word-for-word in the source, the metric is flagged. For borderline cases, a **semantic similarity pass** catches paraphrases the exact-match would miss.
+**Metric extraction** forces the LLM to return the exact verbatim substring it used as evidence for every figure it extracts. A strict string search then confirms the quote exists character-for-character in the source — if even one word differs, the metric is flagged.
 
-The result is a two-panel interface: a metrics table on the left, the raw transcript on the right. Hover any metric and the exact sentence that produced it lights up in yellow. Unverified metrics can be escalated to the **Q&A panel**, where you can ask natural-language questions about the transcript and get answers with pinned source passages.
+**Q&A** goes further. When you ask a free-form question about the transcript, the AI returns an answer alongside the source passages it drew from. Those passages go through a two-stage check: an exact string match first, then — for passages that paraphrase rather than quote directly — a second LLM call that reads the transcript and judges whether the meaning and facts are faithfully preserved. A paraphrase that keeps the numbers right passes; an invented or distorted fact fails.
+
+The result is a side-by-side interface: a metrics table on the left, the raw transcript on the right. Hover any verified metric and its source sentence highlights in yellow. Flagged metrics can be escalated to the Q&A panel for deeper investigation, and analysts can manually mark items as reviewed after reading the source.
 
 **Why this stack:**
 - **FastAPI (Python)** — lightweight, fast to iterate, natural fit for LLM orchestration
@@ -48,12 +50,12 @@ The result is a two-panel interface: a metrics table on the left, the raw transc
 
 | Feature | Description |
 |---|---|
-| **Metric Extraction** | LLM extracts structured metrics (name, value, source quote) from any transcript |
-| **Exact-match Verification** | `str.find()` checks whether the source quote exists verbatim in the document |
-| **Semantic Verification** | Secondary LLM pass validates paraphrased quotes using semantic similarity |
-| **Q&A Panel** | Ask free-form questions about the transcript; answers include highlighted source passages |
-| **Human Review** | Manually approve flagged metrics after reading the source — audit trail included |
-| **Demo Mode** | Runs fully offline with simulated responses — no API key required |
+| **Metric Extraction** | LLM is prompted to copy source quotes character-for-character; structured output returns `name`, `value`, and `source_quote` for every figure |
+| **Exact-match Verification** | `str.find()` confirms the quote exists verbatim in the transcript — intentionally strict for metrics |
+| **Semantic Verification** | Q&A passages that don't match exactly go through a second LLM call that judges whether the facts and meaning are faithfully preserved, not just the wording |
+| **Q&A Panel** | Ask natural-language questions about the transcript; VerifyBot returns a grounded answer with color-coded source passages |
+| **Human Review** | Three audit states — AI Verified (green), Human Verified (blue), Unverified (red) — with manual approval for flagged metrics |
+| **Demo Mode** | Fully offline with simulated responses — no API key required to explore the interface |
 
 ---
 
@@ -61,44 +63,50 @@ The result is a two-panel interface: a metrics table on the left, the raw transc
 
 **Metric extraction & verification pipeline:**
 
+Metrics are verified with exact string matching only. The LLM is explicitly instructed to copy quotes verbatim, so a character-level match is the right bar — any deviation is a signal the model invented or altered the quote.
+
 ```mermaid
 flowchart LR
     A([📄 Financial Transcript]) --> B[Groq · Llama 3.3 70B]
     B --> C["{ name · value · source_quote }"]
     C --> D{Exact-match\nstr.find}
-    D -- match --> V[✅ Verified]
-    D -- no match --> E{Semantic\nSimilarity}
-    E -- similar --> V
-    E -- no match --> F[❌ Hallucinated]
+    D -- match --> V[✅ AI Verified]
+    D -- no match --> F[❌ Hallucinated]
     V --> HR{Human Review\noptional}
     F --> HR
-    HR -- approved --> MV[✅ Manually Verified]
+    HR -- approved --> MV[🔵 Human Verified]
     HR -- skip --> OUT([Final Output])
     MV --> OUT
 
     classDef verified fill:#dcfce7,stroke:#16a34a,color:#15803d
+    classDef human fill:#dbeafe,stroke:#2563eb,color:#1e40af
     classDef hallucinated fill:#fee2e2,stroke:#dc2626,color:#b91c1c
     classDef process fill:#f1f5f9,stroke:#94a3b8,color:#334155
     classDef decision fill:#fef9c3,stroke:#ca8a04,color:#92400e
     classDef io fill:#eff6ff,stroke:#3b82f6,color:#1d4ed8
 
-    class V,MV verified
+    class V verified
+    class MV human
     class F hallucinated
     class B,C process
-    class D,E,HR decision
+    class D,HR decision
     class A,OUT io
 ```
 
 **Q&A pipeline:**
 
+Q&A passages use a two-stage check. The LLM is not required to quote verbatim when answering questions, so the verifier first tries an exact match, then falls back to a semantic LLM pass that distinguishes faithful paraphrases from fabricated or distorted facts.
+
 ```mermaid
 flowchart LR
-    Q([❓ User Question]) --> G[Groq · Llama 3.3 70B]
+    Q([❓ User Question]) --> G[VerifyBot · Groq]
     T([📄 Transcript]) --> G
     G --> A["{ answer · source_passages[ ] }"]
-    A --> VP{Passage\nVerification}
-    VP -- found --> PV[✅ Verified Source]
-    VP -- not found --> PH[❌ Unverifiable Source]
+    A --> S1{Stage 1\nstr.find}
+    S1 -- exact match --> PV[✅ Verified Source]
+    S1 -- no match --> S2{Stage 2\nSemantic LLM}
+    S2 -- facts preserved --> PV
+    S2 -- distorted or invented --> PH[❌ Unverifiable Source]
     PV --> R([💬 Answer + Highlighted Sources])
     PH --> R
 
@@ -111,7 +119,7 @@ flowchart LR
     class PV verified
     class PH hallucinated
     class G,A process
-    class VP decision
+    class S1,S2 decision
     class Q,T,R io
 ```
 
@@ -169,9 +177,10 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 1. The textarea is pre-filled with a sample financial transcript
 2. Click **Analyze →** to extract and verify metrics
 3. Hover any row in the metrics table — the exact source sentence highlights in yellow
-4. Rows marked **Hallucinated** in red have quotes that could not be verified
-5. Click **Ask Q&A** on any unverified metric to open the Q&A panel and investigate further
-6. Use **Mark as Reviewed** to manually approve a metric after inspecting its source
+4. **Green** rows are AI-verified; **red** rows have quotes the engine could not locate in the source
+5. Click **Ask Q&A →** on any flagged metric to open the Q&A panel and ask a follow-up question
+6. Q&A source passages are color-coded: green if verified, red if the claim could not be traced
+7. Click **Mark as Reviewed** to promote a flagged metric to Human Verified (blue) after inspecting its source
 
 > **No API key?** The app runs in demo mode automatically — no setup required to see it in action.
 
