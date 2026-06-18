@@ -1,4 +1,15 @@
-# Verifiable RAG
+<div align="center">
+  <table>
+    <tr>
+      <td valign="middle">
+        <img width="150" height="150" alt="Abstract Illustration Verifiable RAG" src="https://github.com/user-attachments/assets/d8b57177-1954-4075-976e-f178f1b70313" />
+      </td>
+      <td valign="middle">
+        <h1>Verifiable RAG</h1>
+      </td>
+    </tr>
+  </table>
+</div>
 
 **Trace every AI-extracted metric back to its exact source. Ask questions. Flag hallucinations. Review with confidence.**
 
