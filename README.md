@@ -59,30 +59,60 @@ The result is a two-panel interface: a metrics table on the left, the raw transc
 
 ## Architecture
 
-```
-Transcript → Groq (Llama 3.3) → { name, value, source_quote }
-                                          ↓
-                    ┌─────────────────────┴────────────────────┐
-                    │                                          │
-             str.find(quote)                    Semantic similarity check
-                    │                                          │
-              verified ✅                    verified ✅  or  hallucinated ❌
-                    │                                          │
-                    └──────────────────┬───────────────────────┘
-                                       ↓
-                              Human Review (optional)
-                                       ↓
-                                 manuallyVerified ✅
+**Metric extraction & verification pipeline:**
+
+```mermaid
+flowchart LR
+    A([📄 Financial Transcript]) --> B[Groq · Llama 3.3 70B]
+    B --> C["{ name · value · source_quote }"]
+    C --> D{Exact-match\nstr.find}
+    D -- match --> V[✅ Verified]
+    D -- no match --> E{Semantic\nSimilarity}
+    E -- similar --> V
+    E -- no match --> F[❌ Hallucinated]
+    V --> HR{Human Review\noptional}
+    F --> HR
+    HR -- approved --> MV[✅ Manually Verified]
+    HR -- skip --> OUT([Final Output])
+    MV --> OUT
+
+    classDef verified fill:#dcfce7,stroke:#16a34a,color:#15803d
+    classDef hallucinated fill:#fee2e2,stroke:#dc2626,color:#b91c1c
+    classDef process fill:#f1f5f9,stroke:#94a3b8,color:#334155
+    classDef decision fill:#fef9c3,stroke:#ca8a04,color:#92400e
+    classDef io fill:#eff6ff,stroke:#3b82f6,color:#1d4ed8
+
+    class V,MV verified
+    class F hallucinated
+    class B,C process
+    class D,E,HR decision
+    class A,OUT io
 ```
 
-**Q&A flow:**
+**Q&A pipeline:**
 
-```
-Question + Transcript → Groq → { answer, source_passages[] }
-                                          ↓
-                            verify_passages(transcript, passages)
-                                          ↓
-                        Each passage: verified ✅ or hallucinated ❌
+```mermaid
+flowchart LR
+    Q([❓ User Question]) --> G[Groq · Llama 3.3 70B]
+    T([📄 Transcript]) --> G
+    G --> A["{ answer · source_passages[ ] }"]
+    A --> VP{Passage\nVerification}
+    VP -- found --> PV[✅ Verified Source]
+    VP -- not found --> PH[❌ Unverifiable Source]
+    PV --> R([💬 Answer + Highlighted Sources])
+    PH --> R
+
+    classDef verified fill:#dcfce7,stroke:#16a34a,color:#15803d
+    classDef hallucinated fill:#fee2e2,stroke:#dc2626,color:#b91c1c
+    classDef process fill:#f1f5f9,stroke:#94a3b8,color:#334155
+    classDef decision fill:#fef9c3,stroke:#ca8a04,color:#92400e
+    classDef io fill:#eff6ff,stroke:#3b82f6,color:#1d4ed8
+
+    class PV verified
+    class PH hallucinated
+    class G,A process
+    class VP decision
+    class Q,T,R io
 ```
 
 ---
