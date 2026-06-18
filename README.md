@@ -1,6 +1,6 @@
 # Verifiable RAG
 
-**Trace every AI-extracted metric back to its exact source in the original document.**
+**Trace every AI-extracted metric back to its exact source. Ask questions. Flag hallucinations. Review with confidence.**
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
@@ -9,9 +9,17 @@
 
 ---
 
+## Working Demo
+
+<video src="public/Demo.mp4" controls width="100%"></video>
+
+---
+
 ## Table of Contents
 
 - [Description](#description)
+- [Features](#features)
+- [Architecture](#architecture)
 - [Installation](#installation)
 - [Usage](#usage)
 - [Environment Variables](#environment-variables)
@@ -25,26 +33,57 @@
 
 Verifiable RAG solves the core trust problem with AI in financial services: when a model reads a 100-page earnings call and tells you "Revenue grew 15%", how do you know it didn't make that up?
 
-This tool forces the AI to return the **exact verbatim substring** it used as evidence alongside every metric it extracts. A traceability engine then performs a literal string search — if the quote doesn't exist word-for-word in the source, the metric is flagged as potentially hallucinated.
+This tool forces the AI to return the **exact verbatim substring** it used as evidence alongside every metric it extracts. A traceability engine then performs a literal string search — if the quote doesn't exist word-for-word in the source, the metric is flagged. For borderline cases, a **semantic similarity pass** catches paraphrases the exact-match would miss.
 
-The result is a side-by-side interface: a clean metrics table on the left, the raw transcript on the right. Hover any metric and the exact sentence that produced it lights up like a yellow highlighter.
+The result is a two-panel interface: a metrics table on the left, the raw transcript on the right. Hover any metric and the exact sentence that produced it lights up in yellow. Unverified metrics can be escalated to the **Q&A panel**, where you can ask natural-language questions about the transcript and get answers with pinned source passages.
 
 **Why this stack:**
 - **FastAPI (Python)** — lightweight, fast to iterate, natural fit for LLM orchestration
 - **Next.js + TypeScript** — type-safe frontend with React state for real-time hover highlighting
 - **Groq + Llama 3.3 70B** — free-tier inference with JSON mode for reliable structured output
 
-**How the traceability engine works:**
+---
+
+## Features
+
+| Feature | Description |
+|---|---|
+| **Metric Extraction** | LLM extracts structured metrics (name, value, source quote) from any transcript |
+| **Exact-match Verification** | `str.find()` checks whether the source quote exists verbatim in the document |
+| **Semantic Verification** | Secondary LLM pass validates paraphrased quotes using semantic similarity |
+| **Q&A Panel** | Ask free-form questions about the transcript; answers include highlighted source passages |
+| **Human Review** | Manually approve flagged metrics after reading the source — audit trail included |
+| **Demo Mode** | Runs fully offline with simulated responses — no API key required |
+
+---
+
+## Architecture
 
 ```
 Transcript → Groq (Llama 3.3) → { name, value, source_quote }
                                           ↓
-                               str.find(source_quote, transcript)
-                                          ↓
-                          verified ✅  or  hallucinated ❌
+                    ┌─────────────────────┴────────────────────┐
+                    │                                          │
+             str.find(quote)                    Semantic similarity check
+                    │                                          │
+              verified ✅                    verified ✅  or  hallucinated ❌
+                    │                                          │
+                    └──────────────────┬───────────────────────┘
+                                       ↓
+                              Human Review (optional)
+                                       ↓
+                                 manuallyVerified ✅
 ```
 
-If the model paraphrases even a single word, `str.find()` returns `-1` and the metric fails verification.
+**Q&A flow:**
+
+```
+Question + Transcript → Groq → { answer, source_passages[] }
+                                          ↓
+                            verify_passages(transcript, passages)
+                                          ↓
+                        Each passage: verified ✅ or hallucinated ❌
+```
 
 ---
 
@@ -98,9 +137,11 @@ npm run dev
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 1. The textarea is pre-filled with a sample financial transcript
-2. Click **Analyze →**
+2. Click **Analyze →** to extract and verify metrics
 3. Hover any row in the metrics table — the exact source sentence highlights in yellow
-4. Rows marked **Hallucinated** in red have quotes that could not be found verbatim in the transcript
+4. Rows marked **Hallucinated** in red have quotes that could not be verified
+5. Click **Ask Q&A** on any unverified metric to open the Q&A panel and investigate further
+6. Use **Mark as Reviewed** to manually approve a metric after inspecting its source
 
 > **No API key?** The app runs in demo mode automatically — no setup required to see it in action.
 
